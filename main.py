@@ -4,7 +4,12 @@ import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs) -> bool:
+        """Fallback when python-dotenv is not installed."""
+        return False
 
 from src.agent import KnowledgeBaseAgent
 from src.embeddings import (
@@ -15,6 +20,7 @@ from src.embeddings import (
     OpenAIEmbedder,
     _mock_embed,
 )
+from src.markdown_processor import build_rag_chunks_from_file
 from src.models import Document
 from src.store import EmbeddingStore
 
@@ -29,7 +35,7 @@ SAMPLE_FILES = [
 
 
 def load_documents_from_files(file_paths: list[str]) -> list[Document]:
-    """Load documents from file paths for the manual demo."""
+    """Load files and prepare them as RAG-ready documents for the manual demo."""
     allowed_extensions = {".md", ".txt"}
     documents: list[Document] = []
 
@@ -42,6 +48,26 @@ def load_documents_from_files(file_paths: list[str]) -> list[Document]:
 
         if not path.exists() or not path.is_file():
             print(f"Skipping missing file: {path}")
+            continue
+
+        if path.suffix.lower() == ".md":
+            rag_chunks = build_rag_chunks_from_file(path, chunk_size=500, overlap=50)
+            for chunk in rag_chunks:
+                metadata = dict(chunk["metadata"])
+                metadata.update(
+                    {
+                        "source": str(path),
+                        "extension": path.suffix.lower(),
+                        "doc_id": path.stem,
+                    }
+                )
+                documents.append(
+                    Document(
+                        id=f"{path.stem}-{metadata['chunk_index']}",
+                        content=chunk["text"],
+                        metadata=metadata,
+                    )
+                )
             continue
 
         content = path.read_text(encoding="utf-8")
